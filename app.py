@@ -1,3 +1,4 @@
+from flask import Flask, render_template, request
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from datetime import date
@@ -5,10 +6,10 @@ import os
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-import time
 
-print("\n=== BURNOUT & STRESS ANALYSIS SYSTEM (AUTOMATED) ===")
+app = Flask(__name__)
 
+# ================== LOAD & TRAIN MODEL ==================
 df = pd.read_csv(
     r"C:\Users\HP 745 G6\Desktop\burnout ML Project\training_data.csv")
 
@@ -18,26 +19,7 @@ y = df["Burnout"]
 model = LogisticRegression()
 model.fit(X, y)
 
-receiver_email = input("Enter receiver email: ")
-interval_min = int(input("Enter interval between mails (in minutes): "))
-
-scheduled_inputs = []
-
-print("\nEnter future burnout inputs (type 'done' to finish):")
-while True:
-    work = input("Working hours (or 'done'): ")
-    if work.lower() == "done":
-        break
-    sleep = input("Sleep hours: ")
-
-    scheduled_inputs.append({
-        "work": int(work),
-        "sleep": int(sleep)
-    })
-
-print(f"\n✅ {len(scheduled_inputs)} inputs stored successfully!")
-print("📡 Automation started...\n")
-
+# ================== FUNCTIONS ==================
 def get_suggestions(work, sleep):
     if work >= 10 and sleep <= 5:
         return "High", [
@@ -54,46 +36,25 @@ def get_suggestions(work, sleep):
     else:
         return "Low", ["You are following a healthy routine"]
 
-def burnout_risk(model, work, sleep):
+def burnout_risk(work, sleep):
     person = pd.DataFrame([[work, sleep]],
                           columns=["WorkingHours", "SleepHours"])
     return round(model.predict_proba(person)[0][1] * 100, 2)
 
-def ask_reason():
-    print("\nWhy do you think burnout is high?")
-    reasons = {
-        1: "Too many working hours",
-        2: "Not enough sleep",
-        3: "Too many deadlines",
-        4: "No proper breaks"
-    }
-    for k, v in reasons.items():
-        print(f"{k}. {v}")
-    print("5. None")
-
-    choice = int(input("Choose reason: "))
-
-    return {
-        1: ["Reduce work hours", "Delegate tasks"],
-        2: ["Sleep 7+ hours", "Avoid late nights"],
-        3: ["Split tasks", "Set realistic deadlines"],
-        4: ["Take short breaks", "Relax your mind"]
-    }.get(choice, ["Maintain balanced routine"])
-
-def send_email(receiver, stress, trend, suggestions):
+def send_email(receiver, stress, risk, suggestions):
     sender_email = "pavankalyankaturi2803@gmail.com"
     app_password = "ctfo wvli kecm hlan"
 
     msg = MIMEMultipart()
     msg["From"] = sender_email
     msg["To"] = receiver
-    msg["Subject"] = "Burnout Trend Update"
+    msg["Subject"] = "Burnout Analysis Report"
 
     body = f"""
 Hello,
 
 Stress Level: {stress}
-Burnout Trend: {trend}
+Burnout Risk: {risk}%
 
 Suggestions:
 """
@@ -108,50 +69,28 @@ Suggestions:
     server.send_message(msg)
     server.quit()
 
-    print("📧 Email sent successfully")
+# ================== ROUTES ==================
+@app.route("/")
+def index():
+    return render_template("index.html")
 
-os.makedirs("data", exist_ok=True)
-history_file = "data/burnout_history.xlsx"
-previous_risk = None
+@app.route("/analyze", methods=["POST"])
+def analyze():
+    work = int(request.form["work"])
+    sleep = int(request.form["sleep"])
+    receiver = request.form["email"]
 
-for i, entry in enumerate(scheduled_inputs):
-    print(f"\n--- Trigger {i+1} ---")
+    risk = burnout_risk(work, sleep)
+    stress, suggestions = get_suggestions(work, sleep)
 
-    work = entry["work"]
-    sleep = entry["sleep"]
+    send_email(receiver, stress, risk, suggestions)
 
-    current_risk = burnout_risk(model, work, sleep)
-    stress, default_suggestions = get_suggestions(work, sleep)
+    return render_template(
+        "result.html",
+        risk=risk,
+        stress=stress,
+        suggestions=suggestions
+    )
 
-    if previous_risk is None:
-        trend = f"Initial Measurement ({current_risk}%)"
-    elif current_risk > previous_risk:
-        trend = f"Burnout INCREASED ⬆️ ({current_risk}%)"
-    elif current_risk < previous_risk:
-        trend = f"Burnout DECREASED ⬇️ ({current_risk}%)"
-    else:
-        trend = f"No Change ({current_risk}%)"
-
-    if stress == "High":
-        suggestions = ask_reason()
-    else:
-        suggestions = default_suggestions
-
-    # Save history
-    entry_df = pd.DataFrame([[date.today(), current_risk, trend]],
-                            columns=["Date", "BurnoutRisk", "Trend"])
-    if os.path.exists(history_file):
-        old = pd.read_excel(history_file)
-        history_df = pd.concat([old, entry_df], ignore_index=True)
-    else:
-        history_df = entry_df
-    history_df.to_excel(history_file, index=False)
-
-    send_email(receiver_email, stress, trend, suggestions)
-    previous_risk = current_risk
-
-    if i < len(scheduled_inputs) - 1:
-        print(f"⏱ Waiting {interval_min} minute(s)...\n")
-        time.sleep(interval_min * 60)
-
-print("\n✅ AUTOMATION COMPLETED SUCCESSFULLY!")
+if __name__ == "__main__":
+    app.run(debug=True)
