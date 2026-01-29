@@ -1,17 +1,16 @@
 from flask import Flask, render_template, request
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
-from datetime import date
-import os
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 app = Flask(__name__)
 
-# ================== LOAD & TRAIN MODEL ==================
+# ================= LOAD & TRAIN MODEL =================
 df = pd.read_csv(
-    r"C:\Users\HP 745 G6\Desktop\burnout ML Project\training_data.csv")
+    r"C:\Users\HP 745 G6\Desktop\burnout ML Project\training_data.csv"
+)
 
 X = df[["WorkingHours", "SleepHours"]]
 y = df["Burnout"]
@@ -19,7 +18,14 @@ y = df["Burnout"]
 model = LogisticRegression()
 model.fit(X, y)
 
-# ================== FUNCTIONS ==================
+# ================= HELPER FUNCTIONS =================
+def burnout_risk(work, sleep):
+    person = pd.DataFrame(
+        [[work, sleep]],
+        columns=["WorkingHours", "SleepHours"]
+    )
+    return round(model.predict_proba(person)[0][1] * 100, 2)
+
 def get_suggestions(work, sleep):
     if work >= 10 and sleep <= 5:
         return "High", [
@@ -34,12 +40,9 @@ def get_suggestions(work, sleep):
             "Avoid late nights"
         ]
     else:
-        return "Low", ["You are following a healthy routine"]
-
-def burnout_risk(work, sleep):
-    person = pd.DataFrame([[work, sleep]],
-                          columns=["WorkingHours", "SleepHours"])
-    return round(model.predict_proba(person)[0][1] * 100, 2)
+        return "Low", [
+            "You are following a healthy routine"
+        ]
 
 def send_email(receiver, stress, risk, suggestions):
     sender_email = "pavankalyankaturi2803@gmail.com"
@@ -53,8 +56,8 @@ def send_email(receiver, stress, risk, suggestions):
     body = f"""
 Hello,
 
-Stress Level: {stress}
 Burnout Risk: {risk}%
+Stress Level: {stress}
 
 Suggestions:
 """
@@ -69,16 +72,23 @@ Suggestions:
     server.send_message(msg)
     server.quit()
 
-# ================== ROUTES ==================
+# ================= ROUTES =================
 @app.route("/")
-def index():
+def home():
     return render_template("index.html")
 
-@app.route("/analyze", methods=["POST"])
+@app.route("/analyze", methods=["GET", "POST"])
 def analyze():
-    work = int(request.form["work"])
-    sleep = int(request.form["sleep"])
-    receiver = request.form["email"]
+
+    # ----- HANDLE BOTH GET & POST -----
+    if request.method == "POST":
+        work = int(request.form["work"])
+        sleep = int(request.form["sleep"])
+        receiver = request.form["email"]
+    else:
+        work = int(request.args.get("work"))
+        sleep = int(request.args.get("sleep"))
+        receiver = request.args.get("email")
 
     risk = burnout_risk(work, sleep)
     stress, suggestions = get_suggestions(work, sleep)
